@@ -107,6 +107,52 @@ BRIDGE_PORT=3457 UPSTREAM_PORT=3456 bash scripts/setup-bridge.sh
 ```
 Then update `OPENAI_BASE_URL` in OpenClaw config accordingly.
 
+## WhatsApp Gateway Disconnecting Every ~30 Minutes
+
+You may see repeated disconnect/reconnect cycles in the OpenClaw logs or UI:
+
+```
+WhatsApp gateway disconnected (status 499)
+WhatsApp gateway connected as +919860106704.
+WhatsApp gateway disconnected (status 503)
+WhatsApp gateway connected as +919860106704.
+```
+
+This is **normal behavior**. WhatsApp's Web API enforces periodic session refreshes. The status codes (499, 503, 428) reflect different server-side reasons for the disconnect, but the gateway auto-reconnects within a few seconds each time.
+
+**When to worry:**
+- Reconnection takes longer than 30 seconds
+- The gateway stops reconnecting entirely (no "connected" line after a disconnect)
+- You see the same status code repeatedly with no recovery (e.g., 401 means auth expired)
+
+**If it stops reconnecting:**
+```bash
+# Check WhatsApp channel status in gateway logs
+tail -50 ~/.openclaw/logs/gateway.log | grep whatsapp
+
+# Restart the gateway
+kill -USR1 $(pgrep -f openclaw-gateway)
+```
+
+## Bridge Proxy Not Running After Reboot
+
+If the bridge proxy LaunchAgent wasn't set up, it won't survive reboots. Install it:
+
+```bash
+# Check if LaunchAgent exists
+ls ~/Library/LaunchAgents/com.openclaw.bridge-proxy.plist
+
+# If missing, create it (see scripts/setup-bridge.sh) or run:
+bash scripts/setup-bridge.sh
+
+# If it exists but isn't running
+launchctl kickstart -k gui/$(id -u)/com.openclaw.bridge-proxy
+
+# Check logs
+cat /tmp/claude-bridge-proxy.out.log
+cat /tmp/claude-bridge-proxy.err.log
+```
+
 ## Diagnostic Commands Cheat Sheet
 
 ```bash
