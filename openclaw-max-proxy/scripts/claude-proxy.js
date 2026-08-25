@@ -18,7 +18,7 @@ const http = require("http");
 const crypto = require("crypto");
 const os = require("os");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, execFile } = require("child_process");
 
 const discovery = require(path.join(__dirname, "claude-models-discover.js"));
 
@@ -60,6 +60,45 @@ function ensureCatalog() {
 function modelList() {
   const current = ensureCatalog();
   return current && Array.isArray(current.models) ? current.models : [];
+}
+
+// ------------------------------------------------------------------- auth --
+
+// /health used to report "ok" purely because the HTTP listener was up. It stayed
+// green through a ten-day outage after the CLI's OAuth session expired, which is
+// worse than no health check at all. Ask the CLI whether it is actually logged
+// in, cached so /health stays cheap.
+let authState = { checkedAt: 0, loggedIn: null, detail: "not checked yet" };
+const AUTH_TTL_MS = Number(process.env.CLAUDE_PROXY_AUTH_TTL_MS || 60000);
+let authInFlight = false;
+
+function refreshAuth() {
+  if (authInFlight) return;
+  authInFlight = true;
+  execFile(CLAUDE_BIN, ["auth", "status"], { timeout: 20000 }, (err, stdout) => {
+    authInFlight = false;
+    authState.checkedAt = Date.now();
+    if (err && !stdout) {
+      authState.loggedIn = false;
+      authState.detail = `could not run \`${CLAUDE_BIN} auth status\`: ${err.message}`;
+      return;
+    }
+    try {
+      const parsed = JSON.parse(String(stdout).trim());
+      authState.loggedIn = parsed.loggedIn === true;
+      authState.detail = authState.loggedIn
+        ? `logged in via ${parsed.authMethod || "unknown"}${parsed.subscriptionType ? ` (${parsed.subscriptionType})` : ""}`
+        : "CLI is logged out — run: claude auth login";
+    } catch (_) {
+      authState.loggedIn = null;
+      authState.detail = "could not parse auth status output";
+    }
+  });
+}
+
+function authSnapshot() {
+  if (Date.now() - authState.checkedAt > AUTH_TTL_MS) refreshAuth();
+  return authState;
 }
 
 // ---------------------------------------------------------------- messages --
@@ -407,8 +446,15 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && (route === "/health" || route === "/v1/health")) {
     const current = catalog;
-    sendJson(res, 200, {
-      status: "ok",
+    const auth = authSnapshot();
+    const stale = current ? !discovery.isFresh(current) : true;
+    // "ok" must mean requests will actually succeed. Anything else is degraded.
+    const status = auth.loggedIn === false ? "degraded" : auth.loggedIn === null ? "unknown" : "ok";
+    sendJson(res, status === "degraded" ? 503 : 200, {
+      status,
+      auth: { loggedIn: auth.loggedIn, detail: auth.detail, checkedAt: new Date(auth.checkedAt).toISOString() },
+      ...(status === "degraded" ? { error: auth.detail } : {}),
+      ...(stale && status !== "degraded" ? { warning: "model catalog is stale" } : {}),
       provider: "claude-code-cli",
       models: current ? current.models.length : 0,
       cliVersion: current ? current.cliVersion : null,
@@ -470,5 +516,6 @@ for (const sig of ["SIGTERM", "SIGINT"]) {
 
 server.listen(PORT, HOST, () => {
   log(`listening on http://${HOST}:${PORT} (cwd ${CWD}, max ${MAX_CONCURRENT} concurrent)`);
+  refreshAuth(); // so the first /health after a restart already knows the truth
   ensureCatalog();
 });

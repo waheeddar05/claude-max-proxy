@@ -1,5 +1,36 @@
 # Troubleshooting
 
+## Nothing works at all
+
+Check `/health` first — it reports auth, not just whether the listener is up:
+
+```bash
+curl -s http://127.0.0.1:3457/health   # 503 + status "degraded" when the CLI is logged out
+```
+
+`Failed to authenticate: OAuth session expired and could not be refreshed`, or
+`All models failed (3): ... (session_expired)` from the gateway, means the Claude
+Code CLI's OAuth session lapsed. Nothing in this stack can refresh it — the proxy,
+discovery and sync are all fine, they just have no credentials to use. Confirm and
+fix:
+
+```bash
+claude auth status          # expect "loggedIn": true
+claude auth login           # interactive; needs a TTY and a browser
+```
+
+Then re-warm the catalog, which will be stale after any long outage:
+
+```bash
+node ~/.openclaw/claude-models-discover.js --force
+launchctl kickstart -k gui/$(id -u)/com.openclaw.claude-proxy
+launchctl kickstart -k gui/$(id -u)/com.openclaw.model-sync
+```
+
+This expires roughly every few weeks and gives no warning before it does. A run of
+`model-sync` logging "no change" is **not** evidence anything works — it only means
+the model set did not change, and a totally dead CLI produces exactly that.
+
 ## A model is missing (e.g. "I can't see Opus 5")
 
 Work down the pipeline; each step tells you which layer is stale.
@@ -64,8 +95,7 @@ final; anything inconclusive is retried once.
 | 504 timeouts | raise `CLAUDE_PROXY_TIMEOUT_MS` (default 900000) |
 | Requests queue up | raise `CLAUDE_PROXY_MAX_CONCURRENT` (default 4); each run is a CLI process |
 
-Auth expiry looks like every model failing at once. `claude auth status` → re-run
-`claude auth login`, then kickstart the proxy.
+Auth expiry looks like every model failing at once — see "Nothing works at all".
 
 Port already in use: `lsof -nP -iTCP:3457 -sTCP:LISTEN`. Change `PORT` in the proxy
 plist and `OPENCLAW_PROVIDER_BASE_URL` in the model-sync plist together, then re-sync.

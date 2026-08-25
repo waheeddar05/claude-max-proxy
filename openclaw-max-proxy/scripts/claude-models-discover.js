@@ -389,6 +389,21 @@ async function discover(opts) {
   };
 
   const probed = await pool(targets, CONCURRENCY, probeWithRetry);
+
+  // Zero successes across the whole run means the CLI cannot reach the API at
+  // all (expired auth, network, outage) — not that every model retired at once.
+  // Bail before aliases/misses are rebuilt, so a transient failure cannot
+  // degrade stored state, and leave generatedAt alone so the next run retries.
+  const successes = probed.filter((r) => r && r.ok).length;
+  if (successes === 0) {
+    log(
+      `WARNING: all ${probed.length} probes failed — treating as an outage, not model retirement;`,
+      "keeping the previous catalog. Check: claude auth status"
+    );
+    if (cache) return cache;
+    throw new Error("model discovery failed and no cached catalog exists");
+  }
+
   const aliases = {};
   const concrete = new Set(knownGood);
   const superseded = {};
@@ -409,12 +424,6 @@ async function discover(opts) {
       superseded[result.model] = resolved;
       concrete.add(resolved);
     }
-  }
-
-  if (Object.keys(aliases).length === 0 && concrete.size === 0) {
-    log("discovery found nothing callable; keeping previous catalog");
-    if (cache) return cache;
-    throw new Error("model discovery failed and no cached catalog exists");
   }
 
   // Sticky removal: an id that was good before only leaves the catalog after

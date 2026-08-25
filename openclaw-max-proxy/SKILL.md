@@ -107,8 +107,12 @@ only when something changed. **The primary auto-tracks the newest release** in
 
 ## Health checks
 
+`/health` verifies CLI auth, not just that the listener is up: it returns HTTP 503
+and `"status": "degraded"` when the CLI is logged out, with the fix in `error`. A
+green health check means requests will actually succeed.
+
 ```bash
-curl -s http://127.0.0.1:3457/health          # status, model count, cli version, freshness
+curl -s http://127.0.0.1:3457/health          # auth, status, model count, cli version, freshness
 curl -s http://127.0.0.1:3457/v1/models
 curl -s http://127.0.0.1:18789/health         # {"ok":true,"status":"live"}
 openclaw models status
@@ -135,6 +139,10 @@ curl -s -X POST http://127.0.0.1:3457/v1/chat/completions -H "Content-Type: appl
   **stdin** (not argv, so long histories cannot hit `ARG_MAX`).
 - The CLI subprocess inherits the proxy's cwd; the LaunchAgent pins it to
   `~/.openclaw/workspace` so relative-path work does not land at `/`.
+- The CLI's OAuth session expires every few weeks with no warning, and nothing here
+  can refresh it. Everything fails at once with `session_expired`; the fix is an
+  interactive `claude auth login`. Discovery treats an all-probes-failed run as an
+  outage and keeps the previous catalog rather than concluding every model retired.
 - OpenClaw also ships a native `claude-cli` agent runtime that would remove this proxy
   entirely, but it requires `openclaw models auth setup-token` — interactive TTY, and a
   long-lived token rather than the CLI subprocess. Worth evaluating where a TTY exists.
