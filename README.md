@@ -14,11 +14,16 @@ per-env Cloud SQL DBs, secrets, Helm values, ArgoCD apps, ingress/DNS, Kargo
 stages, and the active/passive toggle for side-effecting services. Encodes the
 real infra facts and the failure modes learned standing up `autoship`.
 
-### [`claude-max-proxy/`](./claude-max-proxy/)
-Route OpenClaw through a Claude Max/Pro/Team subscription via the
-claude-max-api-proxy (wraps Claude Code CLI auth as an OpenAI-compatible
-endpoint). _(Moved here from the repo root when this became a multi-skill repo;
-git history is preserved.)_
+### [`openclaw-max-proxy/`](./openclaw-max-proxy/)
+Route OpenClaw through a Claude Max/Pro/Team subscription by driving the Claude
+Code CLI behind a self-contained OpenAI-compatible proxy, so traffic bills
+against the subscription instead of API credits. The model catalog is
+discovered live from the CLI — mined from the installed bundle *and* probed one
+to two releases ahead — so a model released server-side with no CLI update
+still shows up on its own. Ships the proxy, the discovery and config-sync jobs,
+and an idempotent installer. _(Renamed from `claude-max-proxy/`; git history is
+preserved. The third-party `claude-max-api-proxy` it used to wrap is retired —
+it hardcoded three model ids and silently coerced unknown models to opus.)_
 
 ## Using a skill
 
