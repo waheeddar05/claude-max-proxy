@@ -31,6 +31,27 @@ This expires roughly every few weeks and gives no warning before it does. A run 
 `model-sync` logging "no change" is **not** evidence anything works — it only means
 the model set did not change, and a totally dead CLI produces exactly that.
 
+## Everything is down right after an `openclaw` update
+
+An upgrade boots the gateway **out of launchd** and does not always put it back.
+`KeepAlive` does not help — that only restarts a service that crashed, not one that
+was deliberately unloaded. The plist is still on disk, the service is simply gone:
+
+```bash
+launchctl list | grep openclaw            # ai.openclaw.gateway absent
+openclaw gateway status                   # "LaunchAgent (not loaded)" / "Runtime: stopped"
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.openclaw.gateway.plist
+```
+
+`Bootstrap failed: 5: Input/output error` here is usually a lie — check
+`/health` before believing it; the service often loaded anyway.
+
+`scripts/openclaw-watchdog.sh` + the `com.openclaw.watchdog` LaunchAgent make this
+self-healing: every 5 minutes it re-bootstraps any OpenClaw service missing from launchd
+and kickstarts any that is loaded but not listening. It treats *any* HTTP response as
+alive, so the proxy's 503-when-logged-out does not cause a restart loop. Log:
+`~/.openclaw/logs/watchdog.log`.
+
 ## Scheduled automations fail but interactive chat works
 
 OpenClaw 2026.9.x preflights local providers before a scheduled run: it probes the

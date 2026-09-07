@@ -44,7 +44,7 @@ Prerequisites: Node 18+, and Claude Code CLI installed and authenticated
 (`npm install -g @anthropic-ai/claude-code && claude auth login`; check with
 `claude auth status` — expect `"subscriptionType": "max"` or `pro`/`team`).
 
-The installer copies the three scripts to `~/.openclaw/`, installs two LaunchAgents
+The installer copies the scripts to `~/.openclaw/`, installs two LaunchAgents
 (`com.openclaw.claude-proxy` KeepAlive on :3457, `com.openclaw.model-sync` every 6h),
 runs a first discovery, and patches `openclaw.json`. It is idempotent.
 
