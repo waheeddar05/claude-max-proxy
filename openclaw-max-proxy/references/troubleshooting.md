@@ -31,6 +31,34 @@ This expires roughly every few weeks and gives no warning before it does. A run 
 `model-sync` logging "no change" is **not** evidence anything works — it only means
 the model set did not change, and a totally dead CLI produces exactly that.
 
+## Scheduled automations fail but interactive chat works
+
+OpenClaw 2026.9.x preflights local providers before a scheduled run: it probes the
+provider `baseUrl` + `/models` with a **2500ms deadline**. Miss it and the candidate is
+dropped for that run, the fallback chain is tried, and a provider with no credentials
+produces `No API key found for provider "anthropic"`. In `openclaw cron runs --id <job>`
+it looks like:
+
+```
+status: skipped  completion: failed
+error: ... local provider preflight failed at http://127.0.0.1:3457/v1 ...
+       Local provider preflight exceeded its configured 2500ms deadline
+```
+
+It is intermittent by nature — the same job succeeds on the days the proxy happens to be
+idle. Check the latency directly; anything but low single-digit milliseconds is a problem:
+
+```bash
+for i in 1 2 3; do curl -s -o /dev/null -w "%{time_total}s\n" http://127.0.0.1:3457/v1/models; done
+```
+
+**The proxy must never do slow work on that path.** It reads `claude-models.json` and
+reloads it when the file's mtime changes; it does not run discovery. An earlier version
+called `discovery.discover()` in-process when the cache went stale, which spawns up to
+`CLAUDE_PROXY_MAX_CONCURRENT` `claude` processes (a ~250MB binary each) and stalled the
+event loop well past 2500ms every 12h. The `com.openclaw.model-sync` LaunchAgent is the
+only thing that rebuilds the catalog.
+
 ## A model is missing (e.g. "I can't see Opus 5")
 
 Work down the pipeline; each step tells you which layer is stale.

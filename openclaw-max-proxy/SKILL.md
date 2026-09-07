@@ -139,6 +139,11 @@ curl -s -X POST http://127.0.0.1:3457/v1/chat/completions -H "Content-Type: appl
   **stdin** (not argv, so long histories cannot hit `ARG_MAX`).
 - The CLI subprocess inherits the proxy's cwd; the LaunchAgent pins it to
   `~/.openclaw/workspace` so relative-path work does not land at `/`.
+- OpenClaw 2026.9.x preflights local providers with a **2500ms deadline** on
+  `baseUrl + /models`. The proxy therefore only ever *reads* the discovered catalog
+  (reloading it when the file changes) and never runs discovery in-process — model-sync
+  owns that. Blow the deadline and scheduled runs fall through to a provider with no
+  credentials, surfacing as `No API key found for provider "anthropic"`.
 - The CLI's OAuth session expires every few weeks with no warning, and nothing here
   can refresh it. Everything fails at once with `session_expired`; the fix is an
   interactive `claude auth login`. Discovery treats an all-probes-failed run as an

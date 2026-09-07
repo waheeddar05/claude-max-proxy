@@ -19,6 +19,7 @@ const crypto = require("crypto");
 const os = require("os");
 const path = require("path");
 const { spawn, execFile } = require("child_process");
+const fs = require("fs");
 
 const discovery = require(path.join(__dirname, "claude-models-discover.js"));
 
@@ -38,22 +39,28 @@ function log(...a) {
 // ---------------------------------------------------------------- catalog --
 
 let catalog = discovery.readCache();
-let refreshing = false;
+let catalogMtimeMs = 0;
 
-/** Serve the cached catalog immediately; refresh in the background when stale. */
+// The proxy READS the catalog; it never rebuilds one. It used to call
+// discovery.discover() in-process when the cache went stale, which spawns up to
+// CONCURRENCY `claude` processes (a ~250MB binary each). That pinned the event
+// loop for long enough to blow OpenClaw's 2500ms local-provider preflight on
+// /v1/models, which drops this provider for the run and falls through to the
+// built-in `anthropic` provider — surfacing as "No API key found for provider
+// anthropic" on scheduled automations. The model-sync LaunchAgent already owns
+// refresh every 6h, so doing it here was duplicated work as well as a stall.
 function ensureCatalog() {
-  if (catalog && discovery.isFresh(catalog)) return catalog;
-  if (!refreshing) {
-    refreshing = true;
-    discovery
-      .discover({})
-      .then((next) => {
+  try {
+    const { mtimeMs } = fs.statSync(discovery.CACHE_PATH);
+    if (mtimeMs !== catalogMtimeMs) {
+      const next = discovery.readCache();
+      if (next && Array.isArray(next.models)) {
         catalog = next;
-        log(`catalog refreshed: ${next.models.length} model(s), cli ${next.cliVersion}`);
-      })
-      .catch((err) => log(`catalog refresh failed: ${err.message}`))
-      .finally(() => { refreshing = false; });
-  }
+        catalogMtimeMs = mtimeMs;
+        log(`catalog reloaded: ${next.models.length} model(s), cli ${next.cliVersion}`);
+      }
+    }
+  } catch (_) { /* keep whatever is already in memory */ }
   return catalog;
 }
 
